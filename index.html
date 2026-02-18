@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ultron Loans Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --card: #ffffff;
+      --text: #1d2939;
+      --muted: #667085;
+      --accent: #0f62fe;
+      --danger: #d92d20;
+      --warning: #f79009;
+      --success: #12b76a;
+      --border: #d0d5dd;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    header {
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 4px;
+      font-size: 14px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 1px 2px rgba(16,24,40,.05);
+    }
+
+    .kpi-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+    }
+
+    .kpi-value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .kpi-tag {
+      margin-top: 5px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .danger { color: var(--danger); }
+    .warning { color: var(--warning); }
+    .success { color: var(--success); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 14px;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .chart-wrap {
+      height: 280px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 9px 8px;
+      border-bottom: 1px solid #eaecf0;
+      vertical-align: middle;
+    }
+
+    th {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .25px;
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .pill.high { background: #b42318; }
+    .pill.medium { background: #f79009; }
+    .pill.low { background: #039855; }
+
+    .collections-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .collection-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fcfcfd;
+    }
+
+    .line-main {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .line-sub {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Ultron · Dashboard de Préstamos</h1>
+      <div class="subtitle">Monitoreo de riesgo, cobranza y cartera activa</div>
+    </header>
+
+    <section class="kpi-grid" id="kpiGrid"></section>
+
+    <section class="layout">
+      <div class="card">
+        <h2 class="section-title">PAR30 · Últimas 12 semanas</h2>
+        <div class="chart-wrap">
+          <canvas id="parChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">Collections (prioridad)</h2>
+        <ul id="collectionsList" class="collections-list"></ul>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 14px;">
+      <h2 class="section-title">At-risk customers (Top 15)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Segmento</th>
+            <th>Loan ID</th>
+            <th>Monto vencido</th>
+            <th>Días atraso</th>
+            <th>Riesgo</th>
+            <th>Prob. recuperación</th>
+          </tr>
+        </thead>
+        <tbody id="riskTableBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    const fmtCurrency = (n) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
+    const fmtPct = (n) => `${(n * 100).toFixed(1)}%`;
+
+    function mulberry32(seed) {
+      return function () {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      }
+    }
+
+    const random = mulberry32(42);
+
+    const firstNames = ['Ana', 'Luis', 'Carla', 'Jorge', 'María', 'Pedro', 'Diana', 'Ricardo', 'Elena', 'Hugo', 'Paula', 'Rosa', 'Daniel', 'Sofía', 'Tomás', 'Marta', 'Iván', 'Nora', 'Gustavo', 'Liliana'];
+    const lastNames = ['Gómez', 'Pérez', 'López', 'Hernández', 'Torres', 'Ramírez', 'Castro', 'Mendoza', 'Silva', 'Vargas', 'Duarte', 'Rojas'];
+    const segments = ['Microcomercio', 'Asalariado', 'Independiente', 'PyME'];
+
+    function pick(arr) {
+      return arr[Math.floor(random() * arr.length)];
+    }
+
+    const customers = Array.from({ length: 85 }, (_, i) => {
+      const customerId = `C-${String(i + 1).padStart(4, '0')}`;
+      const riskProfile = random();
+      return {
+        id: customerId,
+        name: `${pick(firstNames)} ${pick(lastNames)}`,
+        segment: pick(segments),
+        riskProfile,
+      }
+    });
+
+    const loans = customers.map((customer, idx) => {
+      const principal = 12000 + Math.floor(random() * 108000);
+      const outstanding = principal * (0.22 + random() * 0.63);
+      const daysPastDue = Math.max(0, Math.floor((customer.riskProfile + random() * 0.7 - 0.35) * 75));
+      const weeklyInstallment = principal / (20 + Math.floor(random() * 32));
+      const missedInstallments = daysPastDue > 0 ? Math.ceil(daysPastDue / 7) : 0;
+      const amountDue = Math.max(0, weeklyInstallment * missedInstallments);
+      const recoverProbability = Math.max(0.12, Math.min(0.92, 0.85 - customer.riskProfile * 0.5 - daysPastDue / 190 + random() * 0.14));
+
+      return {
+        loanId: `L-${String(idx + 1).padStart(5, '0')}`,
+        customerId: customer.id,
+        customerName: customer.name,
+        segment: customer.segment,
+        principal,
+        outstanding,
+        daysPastDue,
+        weeklyInstallment,
+        amountDue,
+        recoverProbability,
+        riskScore: (daysPastDue * 1.2) + (1 - recoverProbability) * 100 + (amountDue / 10000),
+      }
+    });
+
+    const today = new Date();
+
+    const payments = Array.from({ length: 450 }, (_, idx) => {
+      const loan = loans[Math.floor(random() * loans.length)];
+      const dayOffset = Math.floor(random() * 35);
+      const amount = loan.weeklyInstallment * (0.45 + random() * 1.05);
+      const paymentDate = new Date(today);
+      paymentDate.setDate(today.getDate() - dayOffset);
+      return {
+        paymentId: `P-${idx + 1}`,
+        loanId: loan.loanId,
+        amount,
+        date: paymentDate,
+      }
+    });
+
+    const outstandingTotal = loans.reduce((sum, l) => sum + l.outstanding, 0);
+    const overdue30 = loans.filter(l => l.daysPastDue >= 30).reduce((sum, l) => sum + l.outstanding, 0);
+    const par30 = overdue30 / outstandingTotal;
+
+    const sameDay = (a, b) => a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+    const oneWeekAgo = new Date(today);
+    oneWeekAgo.setDate(today.getDate() - 7);
+
+    const collectedToday = payments.filter(p => sameDay(p.date, today)).reduce((sum, p) => sum + p.amount, 0);
+    const collectedWeek = payments.filter(p => p.date >= oneWeekAgo).reduce((sum, p) => sum + p.amount, 0);
+    const riskCustomers = loans.filter(l => l.daysPastDue >= 15 || l.recoverProbability < 0.48);
+
+    const kpis = [
+      { label: 'Outstanding', value: fmtCurrency(outstandingTotal), tag: `${loans.length} préstamos activos`, tagClass: '' },
+      { label: 'PAR30', value: fmtPct(par30), tag: par30 > 0.1 ? 'Encima del objetivo' : 'Dentro del objetivo', tagClass: par30 > 0.1 ? 'danger' : 'success' },
+      { label: 'Cobrado hoy', value: fmtCurrency(collectedToday), tag: 'Recaudación diaria', tagClass: 'success' },
+      { label: 'Cobrado semana', value: fmtCurrency(collectedWeek), tag: 'Últimos 7 días', tagClass: 'success' },
+      { label: 'Clientes en riesgo', value: String(riskCustomers.length), tag: 'Con mora o baja recuperación', tagClass: riskCustomers.length > 20 ? 'warning' : 'success' },
+    ];
+
+    const kpiGrid = document.getElementById('kpiGrid');
+    kpiGrid.innerHTML = kpis.map(kpi => `
+      <article class="card">
+        <div class="kpi-label">${kpi.label}</div>
+        <div class="kpi-value">${kpi.value}</div>
+        <div class="kpi-tag ${kpi.tagClass}">${kpi.tag}</div>
+      </article>
+    `).join('');
+
+    const riskRows = [...loans]
+      .sort((a, b) => b.riskScore - a.riskScore)
+      .slice(0, 15);
+
+    const riskTableBody = document.getElementById('riskTableBody');
+    riskTableBody.innerHTML = riskRows.map(row => {
+      const riskLevel = row.daysPastDue > 45 || row.recoverProbability < 0.35 ? 'high' : (row.daysPastDue > 20 ? 'medium' : 'low');
+      const riskLabel = riskLevel === 'high' ? 'Alto' : riskLevel === 'medium' ? 'Medio' : 'Bajo';
+      return `
+        <tr>
+          <td>${row.customerName}</td>
+          <td>${row.segment}</td>
+          <td>${row.loanId}</td>
+          <td>${fmtCurrency(row.amountDue)}</td>
+          <td>${row.daysPastDue}</td>
+          <td><span class="pill ${riskLevel}">${riskLabel}</span></td>
+          <td>${fmtPct(row.recoverProbability)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const collections = [...loans]
+      .filter(l => l.amountDue > 0)
+      .map(l => ({ ...l, priority: l.amountDue * l.recoverProbability }))
+      .sort((a, b) => b.priority - a.priority)
+      .slice(0, 12);
+
+    const collectionsList = document.getElementById('collectionsList');
+    collectionsList.innerHTML = collections.map(item => `
+      <li class="collection-item">
+        <div class="line-main">
+          <span>${item.customerName}</span>
+          <span>${fmtCurrency(item.priority)}</span>
+        </div>
+        <div class="line-sub">
+          <span>${item.loanId} · Due: ${fmtCurrency(item.amountDue)}</span>
+          <span>Rec: ${fmtPct(item.recoverProbability)}</span>
+        </div>
+      </li>
+    `).join('');
+
+    function buildParTrend() {
+      const labels = [];
+      const values = [];
+      const now = new Date();
+      const base = Math.max(0.05, par30 - 0.03);
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i * 7);
+        labels.push(`${d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}`);
+        const noise = (random() - 0.5) * 0.018;
+        const trend = (11 - i) * 0.0018;
+        values.push(Math.max(0.03, Math.min(0.25, base + trend + noise)));
+      }
+      return { labels, values };
+    }
+
+    const trend = buildParTrend();
+    new Chart(document.getElementById('parChart'), {
+      type: 'line',
+      data: {
+        labels: trend.labels,
+        datasets: [{
+          label: 'PAR30',
+          data: trend.values,
+          borderColor: '#0f62fe',
+          backgroundColor: 'rgba(15,98,254,0.12)',
+          fill: true,
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `PAR30: ${(ctx.raw * 100).toFixed(2)}%`,
+            }
+          }
+        },
+        scales: {
+          y: {
+            ticks: {
+              callback: (v) => `${(v * 100).toFixed(0)}%`,
+            },
+            suggestedMin: 0,
+            suggestedMax: 0.22,
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
